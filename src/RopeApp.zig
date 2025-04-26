@@ -13,6 +13,7 @@ const StringOptionsList = OptionsList.init([]const u8);
 const PersonRepository = @import("person_repository.zig");
 const Person = PersonRepository.Person;
 const Database = @import("database.zig");
+const FormInput = @import("form_input.zig");
 
 const InputFocus = enum {
     text,
@@ -27,6 +28,8 @@ const InputFocus = enum {
 };
 
 const App = @This();
+
+form_input: FormInput,
 
 allocator: Allocator,
 input_component: vxfw.TextField,
@@ -51,6 +54,8 @@ person_repository: PersonRepository,
 debug_print: []const u8,
 
 pub fn init(model: *App, allocator: std.mem.Allocator, vaxis_app: *vxfw.App, db: *Database) !App {
+    const form_input: FormInput = FormInput.init(model, allocator, vaxis_app);
+
     const input: vxfw.TextField = .{
         .buf = vxfw.TextField.Buffer.init(allocator),
         .unicode = &vaxis_app.vx.unicode,
@@ -82,6 +87,7 @@ pub fn init(model: *App, allocator: std.mem.Allocator, vaxis_app: *vxfw.App, db:
     const debug_print = p1.name;
 
     return .{
+        .form_input = form_input,
         .debug_print = debug_print,
         .allocator = allocator,
         .db = db,
@@ -232,7 +238,7 @@ pub fn handleEvent(self: *App, ctx: *vxfw.EventContext, event: vxfw.Event) anyer
                 self.input_focus = self.input_focus.next();
                 switch (self.input_focus) {
                     .text => try ctx.requestFocus(self.input_component.widget()),
-                    .filter => try ctx.requestFocus(self.filter_input_component.widget()),
+                    .filter => try ctx.requestFocus(self.form_input.widget()),
                 }
                 return ctx.consumeAndRedraw();
             }
@@ -274,10 +280,10 @@ pub fn draw(self: *App, ctx: vxfw.DrawContext) Allocator.Error!vxfw.Surface {
     };
 
     //Filter
-    const filter_border: vxfw.Border = .{ .child = self.filter_input_component.widget() };
+    // const filter_border: vxfw.Border = .{ .child = self.filter_input_component.widget() };
     const filter_input_surface: vxfw.SubSurface = .{
         .origin = .{ .row = 0, .col = half_width },
-        .surface = try filter_border.draw(ctx.withConstraints(
+        .surface = try self.form_input.draw(ctx.withConstraints(
             ctx.min,
             .{ .width = half_width + 1, .height = 3 },
         )),
