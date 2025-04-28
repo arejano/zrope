@@ -65,7 +65,7 @@ fn buildCreateTableQuery(comptime T: type) []const u8 {
 
 pub fn createTable(self: *Database, comptime T: type) !void {
     const query = comptime buildCreateTableQuery(T);
-    std.debug.print("SQL Query: {s}\n", .{query});
+    // std.debug.print("SQL Query: {s}\n", .{query});
 
     var stmt = try self.conn.prepare(query);
     defer stmt.deinit();

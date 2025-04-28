@@ -27,13 +27,19 @@ const InputFocus = enum {
     }
 };
 
-const App = @This();
+pub const FormInputContext = struct {
+    //
+    form: *FormInput = undefined,
+    app: *RopeApp,
+    field_type: enum { filter, input },
+};
 
-form_input: FormInput,
+const RopeApp = @This();
+
+filter_form_field: FormInput,
+input_form_field: FormInput,
 
 allocator: Allocator,
-input_component: vxfw.TextField,
-filter_input_component: vxfw.TextField,
 
 text_input: []const u8,
 text_filter_input: []const u8,
@@ -50,27 +56,29 @@ filter_list_widget: StringOptionsList,
 //database
 db: *Database,
 person_repository: PersonRepository,
-
 debug_print: []const u8,
-
-pub fn init(model: *App, allocator: std.mem.Allocator, vaxis_app: *vxfw.App, db: *Database) !App {
-    const form_input: FormInput = FormInput.init(model, allocator, vaxis_app);
-
-    const input: vxfw.TextField = .{
+pub fn init(model: *RopeApp, allocator: std.mem.Allocator, vaxis_app: *vxfw.App, db: *Database) !RopeApp {
+    const input_field: vxfw.TextField = .{
+        //
         .buf = vxfw.TextField.Buffer.init(allocator),
         .unicode = &vaxis_app.vx.unicode,
         .userdata = model,
-        .onChange = App.onChange,
-        .onSubmit = App.onSubmit,
+        .onChange = RopeApp.onChange,
+        .onSubmit = RopeApp.onSubmit,
+        .style = .{ .reverse = true },
     };
+    const input_form_field: FormInput = FormInput.init(input_field, .{ .label = "Insert", .required = false });
 
-    const filter_input: vxfw.TextField = .{
+    const filter_field: vxfw.TextField = .{
+        //
         .buf = vxfw.TextField.Buffer.init(allocator),
         .unicode = &vaxis_app.vx.unicode,
         .userdata = model,
-        .onChange = App.filterOnChange,
-        .onSubmit = App.filterOnSubmit,
+        .onChange = RopeApp.filterOnChange,
+        .onSubmit = RopeApp.filterOnSubmit,
+        .style = .{ .reverse = true },
     };
+    const filter_form_field: FormInput = FormInput.init(filter_field, .{ .label = "Filtro", .required = true });
 
     const input_list = std.ArrayList([]const u8).init(allocator);
     const options_list = StringOptionsList.init(&.{}, formatListItem);
@@ -78,16 +86,16 @@ pub fn init(model: *App, allocator: std.mem.Allocator, vaxis_app: *vxfw.App, db:
     const filter_list = std.ArrayList([]const u8).init(allocator);
     const filter_list_widget = StringOptionsList.init(&.{}, formatListItem);
 
-    // Database
-    var person_repository = try PersonRepository.init(db, allocator);
+    const person_repository = try PersonRepository.init(db, allocator);
 
-    const result = try person_repository.findAll();
-    const p1: Person = result[0];
-    std.debug.print("{any}", .{result});
-    const debug_print = p1.name;
+    // const result = try person_repository.findAll();
+    // const p1: Person = result[0];
+    // std.debug.print("{any}", .{result});
+    const debug_print = "";
 
     return .{
-        .form_input = form_input,
+        .filter_form_field = filter_form_field,
+        .input_form_field = input_form_field,
         .debug_print = debug_print,
         .allocator = allocator,
         .db = db,
@@ -96,8 +104,6 @@ pub fn init(model: *App, allocator: std.mem.Allocator, vaxis_app: *vxfw.App, db:
         .filter_list_widget = filter_list_widget,
         .options_list_widget = options_list,
         .input_list = input_list,
-        .filter_input_component = filter_input,
-        .input_component = input,
         .vaxis_app = vaxis_app,
         .text_input = "",
         .text_filter_input = "",
@@ -117,11 +123,11 @@ fn toLower(allocator: std.mem.Allocator, src: []const u8) std.mem.Allocator.Erro
     return lower;
 }
 
-pub fn updateInput(self: *App, str: []const u8) void {
+pub fn updateInput(self: *RopeApp, str: []const u8) void {
     self.text_input = str;
 }
 
-pub fn updateList(self: *App) !void {
+pub fn updateList(self: *RopeApp) !void {
     if (self.text_input.len > 0) {
         try self.input_list.append(self.text_input);
         self.text_input = "";
@@ -131,20 +137,21 @@ pub fn updateList(self: *App) !void {
 }
 
 fn onChange(maybe_ptr: ?*anyopaque, _: *vxfw.EventContext, str: []const u8) anyerror!void {
+    // std.debug.print("onChange_Input", .{});
     const ptr = maybe_ptr orelse return;
-    const self: *App = @ptrCast(@alignCast(ptr));
+    const self: *RopeApp = @ptrCast(@alignCast(ptr));
     self.updateInput(str);
 }
 
 fn onSubmit(maybe_ptr: ?*anyopaque, ctx: *vxfw.EventContext, str: []const u8) anyerror!void {
     const ptr = maybe_ptr orelse return;
-    const self: *App = @ptrCast(@alignCast(ptr));
+    const self: *RopeApp = @ptrCast(@alignCast(ptr));
     const allocator = self.input_list.allocator;
     const text_copy = try allocator.dupe(u8, str);
     errdefer allocator.free(text_copy);
     self.text_input = text_copy;
     try self.updateList();
-    self.input_component.buf.clearAndFree();
+    self.input_form_field.input.buf.clearAndFree();
 
     const name_copy = try allocator.dupe(u8, text_copy);
     defer allocator.free(name_copy);
@@ -168,7 +175,7 @@ fn filterOnSubmit(_: ?*anyopaque, _: *vxfw.EventContext, _: []const u8) anyerror
 
 fn filterOnChange(maybe_ptr: ?*anyopaque, ctx: *vxfw.EventContext, str: []const u8) anyerror!void {
     const ptr = maybe_ptr orelse return;
-    const self: *App = @ptrCast(@alignCast(ptr));
+    const self: *RopeApp = @ptrCast(@alignCast(ptr));
 
     const filter = try filterOptions([]const u8, self.allocator, &self.input_list, str, "null");
     self.filter_list_widget.items = filter.items;
@@ -194,7 +201,7 @@ fn filterOptions(
     return filtered;
 }
 
-pub fn deinit(self: *App) void {
+pub fn deinit(self: *RopeApp) void {
     const allocator = self.input_list.allocator;
     for (self.input_list.items) |item| {
         allocator.free(item);
@@ -204,13 +211,13 @@ pub fn deinit(self: *App) void {
         allocator.free(item);
     }
 
-    self.input_component.deinit();
-    self.filter_input_component.deinit();
+    self.filter_form_field.deinit();
+    self.input_form_field.deinit();
     self.input_list.deinit();
     self.db.deinit();
 }
 
-pub fn widget(self: *App) vxfw.Widget {
+pub fn widget(self: *RopeApp) vxfw.Widget {
     return .{
         .userdata = self,
         .eventHandler = typeErasedEventHandler,
@@ -219,14 +226,14 @@ pub fn widget(self: *App) vxfw.Widget {
 }
 
 fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
-    const self: *App = @ptrCast(@alignCast(ptr));
+    const self: *RopeApp = @ptrCast(@alignCast(ptr));
     return self.handleEvent(ctx, event);
 }
 
-pub fn handleEvent(self: *App, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
+pub fn handleEvent(self: *RopeApp, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
     switch (event) {
         .init => {
-            try ctx.requestFocus(self.input_component.widget());
+            try ctx.requestFocus(self.input_form_field.widget());
         },
         .key_press => |key| {
             if (key.matches('c', .{ .ctrl = true })) {
@@ -234,26 +241,27 @@ pub fn handleEvent(self: *App, ctx: *vxfw.EventContext, event: vxfw.Event) anyer
                 return;
             }
 
-            if (key.matches(0x09, .{})) {
+            if (key.matches(0x09, .{}) or key.matches(0x09, .{ .shift = true })) { // Tab key
                 self.input_focus = self.input_focus.next();
                 switch (self.input_focus) {
-                    .text => try ctx.requestFocus(self.input_component.widget()),
-                    .filter => try ctx.requestFocus(self.form_input.widget()),
+                    .text => try ctx.requestFocus(self.input_form_field.widget()),
+                    .filter => try ctx.requestFocus(self.filter_form_field.widget()),
                 }
-                return ctx.consumeAndRedraw();
+                return;
             }
         },
         .mouse => |_| {},
         .mouse_enter => {},
         .mouse_leave => {},
         .focus_in => {
-            if (ctx.phase == .at_target) {
-                if (self.input_component.widget().eql(self.widget())) {
-                    self.input_focus = .text;
-                } else if (self.filter_input_component.widget().eql(self.widget())) {
-                    self.input_focus = .filter;
-                }
-            }
+            // if (ctx.phase == .at_target) {
+            //     if (self.input_component.widget().eql(self.widget())) {
+            //         self.input_focus = .text;
+            //     } else if (self.form_input.widget().eql(self.widget())) {
+            //         self.input_focus = .filter;
+            //     }
+            //     ctx.consumeAndRedraw();
+            // }
         },
         .focus_out => {},
         else => {},
@@ -261,19 +269,19 @@ pub fn handleEvent(self: *App, ctx: *vxfw.EventContext, event: vxfw.Event) anyer
 }
 
 fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) Allocator.Error!vxfw.Surface {
-    const self: *App = @ptrCast(@alignCast(ptr));
+    const self: *RopeApp = @ptrCast(@alignCast(ptr));
     return self.draw(ctx);
 }
 
-pub fn draw(self: *App, ctx: vxfw.DrawContext) Allocator.Error!vxfw.Surface {
+pub fn draw(self: *RopeApp, ctx: vxfw.DrawContext) Allocator.Error!vxfw.Surface {
     const max_size = ctx.max.size();
     const half_width = @divFloor(max_size.width, 2);
 
     //Input
-    const border: vxfw.Border = .{ .child = self.input_component.widget() };
+    // const border: vxfw.Border = .{ .child = self.input_form_field.widget() };
     const input_surface: vxfw.SubSurface = .{
         .origin = .{ .row = 0, .col = 0 },
-        .surface = try border.draw(ctx.withConstraints(
+        .surface = try self.input_form_field.draw(ctx.withConstraints(
             ctx.min,
             .{ .width = half_width, .height = 3 },
         )),
@@ -283,7 +291,7 @@ pub fn draw(self: *App, ctx: vxfw.DrawContext) Allocator.Error!vxfw.Surface {
     // const filter_border: vxfw.Border = .{ .child = self.filter_input_component.widget() };
     const filter_input_surface: vxfw.SubSurface = .{
         .origin = .{ .row = 0, .col = half_width },
-        .surface = try self.form_input.draw(ctx.withConstraints(
+        .surface = try self.filter_form_field.draw(ctx.withConstraints(
             ctx.min,
             .{ .width = half_width + 1, .height = 3 },
         )),
@@ -316,7 +324,7 @@ pub fn draw(self: *App, ctx: vxfw.DrawContext) Allocator.Error!vxfw.Surface {
     const debug_text: vxfw.Text = .{ .text = self.debug_print, .style = .{ .reverse = true } };
 
     const debug_text_surface: vxfw.SubSurface = .{
-        .origin = .{ .row = 5, .col = 3 },
+        .origin = .{ .row = max_size.height - 5, .col = 3 },
         .surface = try debug_text.draw(ctx.withConstraints(
             ctx.min,
             .{ .width = 20, .height = 20 },
@@ -339,7 +347,7 @@ pub fn draw(self: *App, ctx: vxfw.DrawContext) Allocator.Error!vxfw.Surface {
     return surface;
 }
 
-fn doClick(self: *App, ctx: *vxfw.EventContext) anyerror!void {
+fn doClick(self: *RopeApp, ctx: *vxfw.EventContext) anyerror!void {
     try self.onClick(self.userdata, ctx);
     ctx.consume_event = true;
 }

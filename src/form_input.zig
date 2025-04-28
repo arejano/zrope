@@ -4,56 +4,48 @@ const vaxis = @import("vaxis");
 const Allocator = std.mem.Allocator;
 const RopeApp = @import("RopeApp.zig");
 
+const AppStyles = @import("styles.zig");
+
 const vxfw = vaxis.vxfw;
+
+const InputOptions = struct {
+    label: []const u8 = "no_label",
+    required: bool = false,
+};
 
 const FormInput = @This();
 
+label: []const u8,
 input: vxfw.TextField,
-allocator: std.mem.Allocator,
-userdata: *anyopaque,
+value: []const u8,
+required: bool = false,
 
-pub fn init(model: *RopeApp, allocator: std.mem.Allocator, vaxis_app: *vxfw.App) FormInput {
-    const input: vxfw.TextField = .{
-        .buf = vxfw.TextField.Buffer.init(allocator),
-        .unicode = &vaxis_app.vx.unicode,
-        .userdata = model,
-        .onChange = FormInput.onChange,
-        .onSubmit = FormInput.onSubmit,
-    };
+has_focus: bool = false,
 
-    return .{
-        .allocator = allocator,
-        .userdata = model,
+pub fn init(input: vxfw.TextField, opt: InputOptions) FormInput {
+    var self: FormInput = .{
         .input = input,
+        .has_focus = false,
+        .value = "no_value",
+        .label = "Form_Label",
     };
+
+    self.label = opt.label;
+    self.required = opt.required;
+
+    return self;
 }
 
-fn onChange(maybe_ptr: ?*anyopaque, _: *vxfw.EventContext, str: []const u8) anyerror!void {
-    const ptr = maybe_ptr orelse return;
-    const self: *FormInput = @ptrCast(@alignCast(ptr));
-    _ = self;
-    _ = str;
-    // self.updateInput(str);
-}
-
-fn onSubmit(maybe_ptr: ?*anyopaque, ctx: *vxfw.EventContext, str: []const u8) anyerror!void {
-    const ptr = maybe_ptr orelse return;
-    const self: *FormInput = @ptrCast(@alignCast(ptr));
-    _ = self;
-    _ = ctx;
-    _ = str;
+pub fn widget(self: *FormInput) vxfw.Widget {
+    return .{
+        .userdata = self,
+        .eventHandler = typeErasedEventHandler,
+        .drawFn = typeErasedDrawFn,
+    };
 }
 
 pub fn deinit(self: *FormInput) void {
     self.input.deinit();
-}
-
-pub fn widget(self: *const FormInput) vxfw.Widget {
-    return .{
-        .userdata = @constCast(self),
-        .eventHandler = typeErasedEventHandler,
-        .drawFn = typeErasedDrawFn,
-    };
 }
 
 fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
@@ -62,50 +54,76 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
 }
 
 pub fn handleEvent(self: *FormInput, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
-    _ = self;
-    _ = ctx;
     switch (event) {
-        .init => {
-            // try ctx.requestFocus(self.input_component.widget());
+        .init => {},
+        .key_press => |_| {
+            if (self.has_focus) {
+                try self.input.handleEvent(ctx, event);
+            }
         },
-        .key_press => |_| {},
         .mouse => |_| {},
-        .mouse_enter => {},
+        .mouse_enter => {
+            self.has_focus = true;
+            try ctx.requestFocus(self.widget());
+            ctx.redraw = true;
+        },
         .mouse_leave => {},
         .focus_in => {
-            // if (ctx.phase == .at_target) {
-            //     if (self.input_component.widget().eql(self.widget())) {
-            //         self.input_focus = .text;
-            //     } else if (self.filter_input_component.widget().eql(self.widget())) {
-            //         self.input_focus = .filter;
-            //     }
-            // }
+            if (ctx.phase == .at_target) {
+                self.has_focus = true;
+                try ctx.requestFocus(self.input.widget());
+                try self.input.handleEvent(ctx, event);
+                ctx.redraw = true;
+            }
         },
-        .focus_out => {},
+        .focus_out => {
+            if (ctx.phase == .at_target) {
+                self.has_focus = false;
+                try self.input.handleEvent(ctx, event);
+                ctx.redraw = true;
+            }
+        },
         else => {},
     }
 }
 
 fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) Allocator.Error!vxfw.Surface {
-    const self: *const FormInput = @ptrCast(@alignCast(ptr));
+    const self: *FormInput = @ptrCast(@alignCast(ptr));
     return self.draw(ctx);
 }
 
-pub fn draw(self: *const FormInput, ctx: vxfw.DrawContext) Allocator.Error!vxfw.Surface {
+pub fn draw(self: *FormInput, ctx: vxfw.DrawContext) Allocator.Error!vxfw.Surface {
     const max_size = ctx.max.size();
 
-    const debug_text: vxfw.Text = .{ .text = "Clodoaldo", .style = .{ .reverse = true } };
-
-    const debug_text_surface: vxfw.SubSurface = .{
-        .origin = .{ .row = 0, .col = 0 },
-        .surface = try debug_text.draw(ctx.withConstraints(
-            ctx.min,
-            .{ .width = 20, .height = 20 },
-        )),
+    const required_label = if (self.required) "*" else "";
+    const required_text: vxfw.Text = .{ .text = required_label };
+    const required_surface: vxfw.SubSurface = .{
+        .origin = .{ .row = 0, .col = @intCast(self.label.len + 1) },
+        .surface = try required_text.draw(ctx.withConstraints(ctx.min, .{ .height = 1, .width = max_size.width - 2 })),
     };
 
-    const childs = try ctx.arena.alloc(vxfw.SubSurface, 1);
-    childs[0] = debug_text_surface;
+    const input_surface: vxfw.SubSurface = .{
+        .origin = .{ .row = 1, .col = 1 },
+        .surface = try self.input.draw(ctx.withConstraints(ctx.min, .{ .height = 1, .width = max_size.width - 2 })),
+    };
+
+    const text_label: vxfw.Text = .{ .text = self.label };
+    const form_label_surface: vxfw.SubSurface = .{
+        .origin = .{ .row = 0, .col = 1 },
+        .surface = try text_label.draw(ctx.withConstraints(ctx.min, .{ .height = 1, .width = max_size.width - 2 })),
+    };
+
+    const text_value: vxfw.Text = .{ .text = self.value };
+    const value_surface: vxfw.SubSurface = .{
+        .origin = .{ .row = 2, .col = 1 },
+        .surface = try text_value.draw(ctx.withConstraints(ctx.min, .{ .height = 1, .width = max_size.width - 2 })),
+    };
+
+    const childs = try ctx.arena.alloc(vxfw.SubSurface, 4);
+    childs[0] = input_surface;
+    childs[1] = form_label_surface;
+    childs[2] = value_surface;
+    childs[3] = required_surface;
 
     const surface = try vxfw.Surface.initWithChildren(
         ctx.arena,
@@ -113,5 +131,9 @@ pub fn draw(self: *const FormInput, ctx: vxfw.DrawContext) Allocator.Error!vxfw.
         max_size,
         childs,
     );
+
+    if (self.has_focus) {
+        @memset(surface.buffer, .{ .style = AppStyles.redBg() });
+    }
     return surface;
 }
